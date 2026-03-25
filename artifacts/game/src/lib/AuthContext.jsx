@@ -1,7 +1,5 @@
 import React, { createContext, useState, useContext, useEffect } from 'react';
 
-const API_BASE = (import.meta.env.BASE_URL || '/').replace(/\/$/, '') + '/../api';
-
 const AuthContext = createContext();
 
 export const AuthProvider = ({ children }) => {
@@ -18,17 +16,21 @@ export const AuthProvider = ({ children }) => {
   const checkAuth = async () => {
     try {
       setIsLoadingAuth(true);
-      const res = await fetch(API_BASE + '/auth/user', { credentials: 'include' });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.user) {
-          setUser(data.user);
-          setIsAuthenticated(true);
-        } else {
-          setIsAuthenticated(false);
-        }
+      let stored = localStorage.getItem('eb_local_user');
+      if (stored) {
+        const userData = JSON.parse(stored);
+        setUser(userData);
+        setIsAuthenticated(true);
       } else {
-        setIsAuthenticated(false);
+        const defaultUser = {
+          id: 'local-player',
+          email: 'player@local',
+          name: 'Player',
+          role: 'admin',
+        };
+        localStorage.setItem('eb_local_user', JSON.stringify(defaultUser));
+        setUser(defaultUser);
+        setIsAuthenticated(true);
       }
     } catch (error) {
       console.error('Auth check failed:', error);
@@ -39,13 +41,14 @@ export const AuthProvider = ({ children }) => {
   };
 
   const logout = () => {
+    localStorage.removeItem('eb_local_user');
     setUser(null);
     setIsAuthenticated(false);
-    window.location.href = API_BASE + '/logout';
+    window.location.reload();
   };
 
   const navigateToLogin = () => {
-    window.location.href = API_BASE + '/login?returnTo=' + encodeURIComponent(window.location.pathname);
+    checkAuth();
   };
 
   return (

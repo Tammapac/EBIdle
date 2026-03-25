@@ -25,6 +25,7 @@ export default function CharacterCreation({ onCreated }) {
         const baseMp = (CLASS_BASE_MP[selectedClass] || 50) + cls.baseStats.intelligence * INT_TO_MP;
         const char = await base44.entities.Character.create({
           name,
+          created_by: me.email,
           class: selectedClass,
           level: 1,
           exp: 0,
