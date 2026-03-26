@@ -29,6 +29,7 @@ import ChatWindow from "./components/game/ChatWindow";
 import DailyLoginModal from "./components/game/DailyLoginModal";
 import PartyPanel from "./components/game/PartyPanel";
 import { useCharacterAutoSave } from "./hooks/useCharacterAutoSave";
+import { supabaseSync } from "@/lib/supabaseSync";
 
 const GameApp = () => {
   const { isAuthenticated } = useAuth();
@@ -59,6 +60,9 @@ const GameApp = () => {
         localStorage.setItem(storeKey, JSON.stringify(chars));
       }
     } catch {}
+    if (supabaseSync.isEnabled()) {
+      supabaseSync.fullSync(character.id).catch(() => {});
+    }
   }, [character?.id]);
 
   const setCharacter = (charOrUpdater) => {

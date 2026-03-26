@@ -1,4 +1,5 @@
 import { ENEMIES as GAME_ENEMIES, REGIONS as GAME_REGIONS, generateLoot as gameLootGen, calculateExpToLevel as calcExpToLevel } from '@/lib/gameData';
+import { supabaseSync } from '@/lib/supabaseSync';
 
 const MODE_KEY = 'eb_connection_mode';
 const API_URL_KEY = 'eb_api_url';
@@ -113,6 +114,12 @@ function createLocalEntityProxy(entityName) {
       records.push(record);
       setStore(entityName, records);
       notifySubscribers(entityName, { type: 'create', id: record.id, data: record });
+      if (supabaseSync.isEnabled()) {
+        if (entityName === 'Character') supabaseSync.syncCharacter(record).catch(() => {});
+        else if (entityName === 'Item') supabaseSync.syncItem(record).catch(() => {});
+        else if (entityName === 'Quest') supabaseSync.syncQuest(record).catch(() => {});
+        else if (entityName === 'Resource') supabaseSync.syncResource(record).catch(() => {});
+      }
       return record;
     },
 
@@ -144,6 +151,12 @@ function createLocalEntityProxy(entityName) {
       records[idx] = { ...records[idx], ...data, updated_date: now, updatedAt: now };
       setStore(entityName, records);
       notifySubscribers(entityName, { type: 'update', id, data: records[idx] });
+      if (supabaseSync.isEnabled()) {
+        if (entityName === 'Character') supabaseSync.syncCharacter(records[idx]).catch(() => {});
+        else if (entityName === 'Item') supabaseSync.syncItem(records[idx]).catch(() => {});
+        else if (entityName === 'Quest') supabaseSync.syncQuest(records[idx]).catch(() => {});
+        else if (entityName === 'Resource') supabaseSync.syncResource(records[idx]).catch(() => {});
+      }
       return records[idx];
     },
 
@@ -152,6 +165,9 @@ function createLocalEntityProxy(entityName) {
       records = records.filter(r => r.id !== id);
       setStore(entityName, records);
       notifySubscribers(entityName, { type: 'delete', id });
+      if (supabaseSync.isEnabled()) {
+        if (entityName === 'Item') supabaseSync.deleteItem(id).catch(() => {});
+      }
       return { success: true };
     },
 
@@ -1393,6 +1409,11 @@ async function handleLocalFunction(functionName, params) {
             });
           }
         } catch {}
+
+        if (supabaseSync.isEnabled()) {
+          supabaseSync.syncCharacter(chars[charIdx]).catch(() => {});
+          if (lootDrop) supabaseSync.syncItem(lootDrop).catch(() => {});
+        }
 
         return {
           data: {
