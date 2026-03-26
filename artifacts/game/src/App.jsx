@@ -93,7 +93,13 @@ const GameApp = () => {
   };
 
   const handleCharacterUpdate = (updated) => {
-    setCharacter(prev => ({ ...prev, ...updated }));
+    setCharacter(prev => {
+      const merged = { ...prev, ...updated };
+      if (supabaseSync.isEnabled()) {
+        supabaseSync.syncCharacter(merged).catch(() => {});
+      }
+      return merged;
+    });
   };
 
   const handleBackToSelection = () => {

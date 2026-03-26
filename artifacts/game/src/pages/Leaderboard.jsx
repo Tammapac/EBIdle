@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { base44 } from "@/api/base44Client";
+import { supabaseSync } from "@/lib/supabaseSync";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
 import { Badge } from "@/components/ui/badge";
@@ -21,8 +22,14 @@ export default function Leaderboard() {
 
   const { data: characters = [], isLoading } = useQuery({
     queryKey: ["leaderboard"],
-    queryFn: () => base44.entities.Character.list("-level", 50),
-    refetchInterval: 30000, // refresh every 30s for live levels
+    queryFn: async () => {
+      if (supabaseSync.isEnabled()) {
+        const players = await supabaseSync.fetchAllServerPlayers();
+        if (players.length > 0) return players;
+      }
+      return base44.entities.Character.list("-level", 50);
+    },
+    refetchInterval: 30000,
   });
 
   const { data: userRoles = {} } = useQuery({

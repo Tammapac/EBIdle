@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { base44 } from "@/api/base44Client";
+import { supabaseSync } from "@/lib/supabaseSync";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -18,6 +19,8 @@ const CLASS_ICONS = {
   warrior: "⚔️", mage: "🔮", ranger: "🏹", rogue: "🗡️"
 };
 
+const useSupabase = supabaseSync.isEnabled();
+
 export default function PartyPanel({ character }) {
   const [minimized, setMinimized] = useState(true);
   const [expanded, setExpanded] = useState(true);
@@ -31,6 +34,9 @@ export default function PartyPanel({ character }) {
   const { data: partyData } = useQuery({
     queryKey: ["party", character?.id],
     queryFn: async () => {
+      if (useSupabase) {
+        return await supabaseSync.getPartyForCharacter(character.id);
+      }
       const led = await base44.entities.Party.filter({ leader_id: character.id });
       const active = led.find(p => p.status !== 'disbanded');
       if (active) return active;
@@ -47,15 +53,20 @@ export default function PartyPanel({ character }) {
       const updates = {};
       const levels = {};
       await Promise.all(partyData.members.map(async (m) => {
+        if (m.character_id === character.id) return;
         try {
-          const chars = await base44.entities.Character.filter({ id: m.character_id });
-          if (chars[0]) {
-            levels[m.character_id] = chars[0].level;
-            updates[m.character_id] = {
-              level: chars[0].level,
-              current_region: chars[0].current_region,
-              class: chars[0].class,
-            };
+          if (useSupabase) {
+            const charData = await supabaseSync.getCharacterById(m.character_id);
+            if (charData) {
+              levels[m.character_id] = charData.level;
+              updates[m.character_id] = { level: charData.level, current_region: charData.current_region, class: charData.class };
+            }
+          } else {
+            const chars = await base44.entities.Character.filter({ id: m.character_id });
+            if (chars[0]) {
+              levels[m.character_id] = chars[0].level;
+              updates[m.character_id] = { level: chars[0].level, current_region: chars[0].current_region, class: chars[0].class };
+            }
           }
         } catch {}
       }));
@@ -69,22 +80,105 @@ export default function PartyPanel({ character }) {
 
   const { data: pendingInvites = [] } = useQuery({
     queryKey: ["partyInvites", character?.id],
-    queryFn: () => base44.entities.PartyInvite.filter({ to_character_id: character.id, status: 'pending' }),
+    queryFn: async () => {
+      if (useSupabase) {
+        return await supabaseSync.getPendingInvites(character.id);
+      }
+      return base44.entities.PartyInvite.filter({ to_character_id: character.id, status: 'pending' });
+    },
     enabled: !!character?.id,
     refetchInterval: 5000,
   });
 
+  const invalidateParty = () => {
+    queryClient.invalidateQueries({ queryKey: ["party"] });
+    queryClient.invalidateQueries({ queryKey: ["partyInvites"] });
+  };
+
   const mutation = useMutation({
-    mutationFn: (payload) => base44.functions.invoke("manageParty", { characterId: character.id, ...payload }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["party"] });
-      queryClient.invalidateQueries({ queryKey: ["partyInvites"] });
+    mutationFn: async (payload) => {
+      if (useSupabase) {
+        return await handleSupabasePartyAction(payload);
+      }
+      return base44.functions.invoke("manageParty", { characterId: character.id, ...payload });
     },
+    onSuccess: invalidateParty,
     onError: (e) => {
-      const msg = e?.response?.data?.error || e.message || "Action failed";
+      const msg = e?.message || "Action failed";
       toast({ title: msg, variant: "destructive" });
     },
   });
+
+  const handleSupabasePartyAction = async (payload) => {
+    const { action, partyId, targetCharacterId, targetName, inviteId } = payload;
+
+    if (action === 'create') {
+      const party = await supabaseSync.createParty(character.id, character.name, character.class, character.level);
+      if (!party) throw new Error("Failed to create party");
+      return { data: { success: true, party } };
+    }
+
+    if (action === 'invite') {
+      let resolvedTargetId = targetCharacterId;
+      if (targetName) {
+        const found = await supabaseSync.fetchPlayerByName(targetName);
+        if (!found) throw new Error(`Player "${targetName}" not found`);
+        resolvedTargetId = found.id;
+      }
+      if (!resolvedTargetId) throw new Error("No target specified");
+      if (resolvedTargetId === character.id) throw new Error("Cannot invite yourself");
+      const invite = await supabaseSync.createPartyInvite(partyId, character.id, character.name, resolvedTargetId);
+      if (!invite) throw new Error("Failed to send invite");
+      return { data: { success: true, invite } };
+    }
+
+    if (action === 'accept') {
+      const inv = await supabaseSync.getInviteById(inviteId);
+      if (!inv || inv.status !== 'pending') throw new Error("Invite not found or expired");
+      if (inv.to_character_id !== character.id) throw new Error("This invite is not for you");
+      const party = await supabaseSync.getPartyById(inv.party_id);
+      if (!party || party.status === 'disbanded') throw new Error("Party no longer exists");
+      const members = party.members || [];
+      if (members.length >= (party.max_members || 6)) {
+        await supabaseSync.updateInviteStatus(inviteId, 'declined');
+        throw new Error("Party is full");
+      }
+      if (members.some(m => m.character_id === character.id)) {
+        await supabaseSync.updateInviteStatus(inviteId, 'accepted');
+        return { data: { success: true } };
+      }
+      members.push({ character_id: character.id, name: character.name, class: character.class, level: character.level });
+      await supabaseSync.updateParty(inv.party_id, { members });
+      await supabaseSync.updateInviteStatus(inviteId, 'accepted');
+      return { data: { success: true } };
+    }
+
+    if (action === 'decline') {
+      const inv = await supabaseSync.getInviteById(inviteId);
+      if (inv && inv.to_character_id !== character.id) throw new Error("This invite is not for you");
+      await supabaseSync.updateInviteStatus(inviteId, 'declined');
+      return { data: { success: true } };
+    }
+
+    if (action === 'leave') {
+      const party = await supabaseSync.getPartyById(partyId);
+      if (!party) return { data: { success: true } };
+      const members = (party.members || []).filter(m => m.character_id !== character.id);
+      if (members.length === 0) {
+        await supabaseSync.updateParty(partyId, { status: 'disbanded', members: [] });
+      } else {
+        const updates = { members };
+        if (party.leader_id === character.id && members.length > 0) {
+          updates.leader_id = members[0].character_id;
+          updates.leader_name = members[0].name;
+        }
+        await supabaseSync.updateParty(partyId, updates);
+      }
+      return { data: { success: true } };
+    }
+
+    return { data: { success: true } };
+  };
 
   const isPlayerInParty = partyData && partyData.status !== 'disbanded' && partyData.members?.some(m => m.character_id === character.id);
   const isLeader = partyData?.leader_id === character.id;
@@ -110,7 +204,6 @@ export default function PartyPanel({ character }) {
       payload.targetCharacterId = inviteTarget;
     } else {
       payload.targetName = inviteTarget;
-      payload.targetCharacterId = inviteTarget;
     }
     mutation.mutate(payload, {
       onSuccess: () => {

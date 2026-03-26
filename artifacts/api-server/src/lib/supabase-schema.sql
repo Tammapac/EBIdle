@@ -316,3 +316,26 @@ CREATE TABLE IF NOT EXISTS user_roles (
   role varchar NOT NULL DEFAULT 'player',
   updated_at timestamptz NOT NULL DEFAULT now()
 );
+
+-- ============ RLS POLICIES ============
+-- Allow anon key full access for game operations
+
+DO $$ 
+DECLARE t text;
+BEGIN
+  FOR t IN 
+    SELECT tablename FROM pg_tables 
+    WHERE schemaname = 'public' 
+    AND tablename IN (
+      'users','characters','items','guilds','quests','trades',
+      'parties','party_activities','party_invites','presences',
+      'player_sessions','chat_messages','mail','resources',
+      'game_config','friend_requests','friendships','trade_sessions',
+      'dungeon_sessions','gem_labs','private_messages','user_roles','sessions'
+    )
+  LOOP
+    EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);
+    EXECUTE format('DROP POLICY IF EXISTS allow_anon_all ON %I', t);
+    EXECUTE format('CREATE POLICY allow_anon_all ON %I FOR ALL USING (true) WITH CHECK (true)', t);
+  END LOOP;
+END $$;

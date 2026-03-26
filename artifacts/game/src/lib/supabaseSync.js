@@ -329,7 +329,7 @@ export const supabaseSync = {
     try {
       const { data, error } = await sb
         .from("characters")
-        .select("id, name, class, level, gold, gems, hp, max_hp, created_by, updated_at")
+        .select("id, name, class, level, gold, gems, hp, max_hp, total_kills, total_damage, current_region, created_by, is_banned, title, prestige_level, equipment, updated_at")
         .order("level", { ascending: false })
         .limit(200);
       if (error) throw error;
@@ -338,6 +338,174 @@ export const supabaseSync = {
       console.warn("[supabaseSync] fetchAllServerPlayers failed:", e.message);
       return [];
     }
+  },
+
+  async fetchPlayerByName(name) {
+    const sb = getSupabase();
+    if (!sb || !name) return null;
+    try {
+      const { data, error } = await sb
+        .from("characters")
+        .select("id, name, class, level, current_region")
+        .ilike("name", name)
+        .limit(1);
+      if (error || !data?.length) return null;
+      return data[0];
+    } catch { return null; }
+  },
+
+  async createParty(characterId, charName, charClass, charLevel) {
+    const sb = getSupabase();
+    if (!sb) return null;
+    try {
+      const { data, error } = await sb.from("parties").insert({
+        leader_id: characterId,
+        leader_name: charName,
+        members: [{ character_id: characterId, name: charName, class: charClass, level: charLevel }],
+        max_members: 6,
+        status: "open",
+      }).select().single();
+      if (error) throw error;
+      return data;
+    } catch (e) {
+      console.warn("[supabaseSync] createParty failed:", e.message);
+      return null;
+    }
+  },
+
+  async getPartyForCharacter(characterId) {
+    const sb = getSupabase();
+    if (!sb || !characterId) return null;
+    try {
+      const { data: led } = await sb.from("parties")
+        .select("*")
+        .eq("leader_id", characterId)
+        .neq("status", "disbanded")
+        .limit(1);
+      if (led?.length) return led[0];
+
+      const { data: memberOf } = await sb.from("parties")
+        .select("*")
+        .neq("status", "disbanded")
+        .contains("members", JSON.stringify([{ character_id: characterId }]))
+        .limit(1);
+      return memberOf?.length ? memberOf[0] : null;
+    } catch (e) {
+      console.warn("[supabaseSync] getPartyForCharacter failed:", e.message);
+      return null;
+    }
+  },
+
+  async updateParty(partyId, updates) {
+    const sb = getSupabase();
+    if (!sb || !partyId) return null;
+    try {
+      const { data, error } = await sb.from("parties")
+        .update({ ...updates, updated_at: new Date().toISOString() })
+        .eq("id", partyId)
+        .select()
+        .single();
+      if (error) throw error;
+      return data;
+    } catch (e) {
+      console.warn("[supabaseSync] updateParty failed:", e.message);
+      return null;
+    }
+  },
+
+  async createPartyInvite(partyId, fromCharId, fromName, toCharId) {
+    const sb = getSupabase();
+    if (!sb) return null;
+    try {
+      const { data, error } = await sb.from("party_invites").insert({
+        party_id: partyId,
+        from_character_id: fromCharId,
+        from_character_name: fromName,
+        to_character_id: toCharId,
+        status: "pending",
+      }).select().single();
+      if (error) throw error;
+      return data;
+    } catch (e) {
+      console.warn("[supabaseSync] createPartyInvite failed:", e.message);
+      return null;
+    }
+  },
+
+  async getPendingInvites(characterId) {
+    const sb = getSupabase();
+    if (!sb || !characterId) return [];
+    try {
+      const { data, error } = await sb.from("party_invites")
+        .select("*")
+        .eq("to_character_id", characterId)
+        .eq("status", "pending")
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      return (data || []).map(inv => ({
+        ...inv,
+        from_name: inv.from_character_name,
+      }));
+    } catch (e) {
+      console.warn("[supabaseSync] getPendingInvites failed:", e.message);
+      return [];
+    }
+  },
+
+  async updateInviteStatus(inviteId, status) {
+    const sb = getSupabase();
+    if (!sb || !inviteId) return null;
+    try {
+      const { data, error } = await sb.from("party_invites")
+        .update({ status, updated_at: new Date().toISOString() })
+        .eq("id", inviteId)
+        .select()
+        .single();
+      if (error) throw error;
+      return data;
+    } catch (e) {
+      console.warn("[supabaseSync] updateInviteStatus failed:", e.message);
+      return null;
+    }
+  },
+
+  async getInviteById(inviteId) {
+    const sb = getSupabase();
+    if (!sb || !inviteId) return null;
+    try {
+      const { data, error } = await sb.from("party_invites")
+        .select("*")
+        .eq("id", inviteId)
+        .single();
+      if (error) throw error;
+      return data;
+    } catch { return null; }
+  },
+
+  async getPartyById(partyId) {
+    const sb = getSupabase();
+    if (!sb || !partyId) return null;
+    try {
+      const { data, error } = await sb.from("parties")
+        .select("*")
+        .eq("id", partyId)
+        .single();
+      if (error) throw error;
+      return data;
+    } catch { return null; }
+  },
+
+  async getCharacterById(characterId) {
+    const sb = getSupabase();
+    if (!sb || !characterId) return null;
+    try {
+      const { data, error } = await sb.from("characters")
+        .select("id, name, class, level, current_region")
+        .eq("id", characterId)
+        .single();
+      if (error) return null;
+      return data;
+    } catch { return null; }
   },
 
   async fullSync(characterId) {
