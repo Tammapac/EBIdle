@@ -1299,108 +1299,117 @@ async function handleLocalFunction(functionName, params) {
     }
 
     case 'fight': {
-      const { enemyKey, regionKey, isElite, isBoss, equipmentIds, partySize: pSize, skillUsed } = params;
-      const chars = getStore('Character');
-      const charIdx = chars.findIndex(c => c.id === characterId);
-      if (charIdx === -1) return { data: { success: false, error: 'Character not found' } };
-      const char = chars[charIdx];
-
-      const enemyData = GAME_ENEMIES?.[enemyKey];
-      if (!enemyData) return { data: { success: false, error: 'Unknown enemy' } };
-
-      const baseExpReward = enemyData.expReward || 10;
-      const baseGoldReward = enemyData.goldReward || 5;
-
-      const partyBonus = Math.max(0, (pSize || 1) - 1) * 0.05;
-      const expGain = Math.round(baseExpReward * (1 + partyBonus));
-      const goldGain = Math.round(baseGoldReward * (1 + partyBonus));
-
-      let newExp = (char.exp || 0) + expGain;
-      let newLevel = char.level || 1;
-      let newExpToNext = char.exp_to_next || calcExpToLevel(newLevel);
-      let newStatPoints = char.stat_points || 0;
-      let newSkillPoints = char.skill_points || 0;
-      const levelsGained = [];
-
-      while (newExp >= newExpToNext) {
-        newExp -= newExpToNext;
-        newLevel++;
-        newExpToNext = calcExpToLevel(newLevel);
-        newStatPoints += 3;
-        newSkillPoints += 1;
-        levelsGained.push(newLevel);
-      }
-
-      const levelDiff = newLevel - (char.level || 1);
-      const newMaxHp = (char.max_hp || 100) + levelDiff * 5;
-      const newMaxMp = (char.max_mp || 50) + levelDiff * 3;
-      const newGold = (char.gold || 0) + goldGain;
-      const newTotalKills = (char.total_kills || 0) + 1;
-
-      let lootDrop = null;
       try {
-        lootDrop = gameLootGen(
-          newLevel,
-          char.luck || 5,
-          isElite || isBoss || false,
-          regionKey || char.current_region,
-          char.class
-        );
-      } catch {}
+        const { enemyKey, regionKey, isElite, isBoss, equipmentIds, partySize: pSize, skillUsed, _fallbackCharacter } = params;
+        let chars = getStore('Character');
+        let charIdx = chars.findIndex(c => c.id === characterId);
+        if (charIdx === -1 && _fallbackCharacter && _fallbackCharacter.id === characterId) {
+          chars.push(_fallbackCharacter);
+          setStore('Character', chars);
+          charIdx = chars.length - 1;
+        }
+        if (charIdx === -1) return { data: { success: false, error: 'Character not found' } };
+        const char = chars[charIdx];
 
-      if (lootDrop) {
-        const items = getStore('Item');
-        const newItem = { id: generateId(), ...lootDrop, owner_id: characterId };
-        items.push(newItem);
-        setStore('Item', items);
-        notifySubscribers('Item', { type: 'create', data: newItem });
-        lootDrop = newItem;
+        const enemyData = GAME_ENEMIES?.[enemyKey];
+        if (!enemyData) return { data: { success: false, error: 'Unknown enemy: ' + enemyKey } };
+
+        const baseExpReward = enemyData.expReward || 10;
+        const baseGoldReward = enemyData.goldReward || 5;
+
+        const partyBonus = Math.max(0, (pSize || 1) - 1) * 0.05;
+        const expGain = Math.round(baseExpReward * (1 + partyBonus));
+        const goldGain = Math.round(baseGoldReward * (1 + partyBonus));
+
+        let newExp = (char.exp || 0) + expGain;
+        let newLevel = char.level || 1;
+        let newExpToNext = char.exp_to_next || calcExpToLevel(newLevel);
+        let newStatPoints = char.stat_points || 0;
+        let newSkillPoints = char.skill_points || 0;
+        const levelsGained = [];
+
+        while (newExp >= newExpToNext) {
+          newExp -= newExpToNext;
+          newLevel++;
+          newExpToNext = calcExpToLevel(newLevel);
+          newStatPoints += 3;
+          newSkillPoints += 1;
+          levelsGained.push(newLevel);
+        }
+
+        const levelDiff = newLevel - (char.level || 1);
+        const newMaxHp = (char.max_hp || 100) + levelDiff * 5;
+        const newMaxMp = (char.max_mp || 50) + levelDiff * 3;
+        const newGold = (char.gold || 0) + goldGain;
+        const newTotalKills = (char.total_kills || 0) + 1;
+
+        let lootDrop = null;
+        try {
+          lootDrop = gameLootGen(
+            newLevel,
+            char.luck || 5,
+            isElite || isBoss || false,
+            regionKey || char.current_region,
+            char.class
+          );
+        } catch {}
+
+        if (lootDrop) {
+          const items = getStore('Item');
+          const newItem = { id: generateId(), ...lootDrop, owner_id: characterId };
+          items.push(newItem);
+          setStore('Item', items);
+          notifySubscribers('Item', { type: 'create', data: newItem });
+          lootDrop = newItem;
+        }
+
+        chars[charIdx] = {
+          ...chars[charIdx],
+          exp: newExp,
+          level: newLevel,
+          exp_to_next: newExpToNext,
+          gold: newGold,
+          stat_points: newStatPoints,
+          skill_points: newSkillPoints,
+          total_kills: newTotalKills,
+          max_hp: newMaxHp,
+          max_mp: newMaxMp,
+        };
+        setStore('Character', chars);
+        notifySubscribers('Character', { type: 'update', id: characterId, data: chars[charIdx] });
+
+        try {
+          handleLocalFunction('updateQuestProgress', {
+            characterId, objectiveType: 'combat_kills', amount: 1,
+          });
+          if (goldGain > 0) {
+            handleLocalFunction('updateQuestProgress', {
+              characterId, objectiveType: 'gold_earned', amount: goldGain,
+            });
+          }
+          if (levelDiff > 0) {
+            handleLocalFunction('updateQuestProgress', {
+              characterId, objectiveType: 'level_up', amount: levelDiff,
+            });
+          }
+        } catch {}
+
+        return {
+          data: {
+            success: true,
+            rewards: { exp: expGain, gold: goldGain },
+            character: chars[charIdx],
+            levelsGained,
+            loot: lootDrop,
+            newLevel,
+            newExp,
+            newGold,
+          },
+        };
+      } catch (fightErr) {
+        console.error('[fight] Internal error:', fightErr);
+        return { data: { success: false, error: fightErr.message || 'Internal fight error' } };
       }
-
-      chars[charIdx] = {
-        ...chars[charIdx],
-        exp: newExp,
-        level: newLevel,
-        exp_to_next: newExpToNext,
-        gold: newGold,
-        stat_points: newStatPoints,
-        skill_points: newSkillPoints,
-        total_kills: newTotalKills,
-        max_hp: newMaxHp,
-        max_mp: newMaxMp,
-      };
-      setStore('Character', chars);
-      notifySubscribers('Character', { type: 'update', id: characterId, data: chars[charIdx] });
-
-      const questUpdates = [];
-      try {
-        handleLocalFunction('updateQuestProgress', {
-          characterId, objectiveType: 'combat_kills', amount: 1,
-        });
-        if (goldGain > 0) {
-          handleLocalFunction('updateQuestProgress', {
-            characterId, objectiveType: 'gold_earned', amount: goldGain,
-          });
-        }
-        if (levelDiff > 0) {
-          handleLocalFunction('updateQuestProgress', {
-            characterId, objectiveType: 'level_up', amount: levelDiff,
-          });
-        }
-      } catch {}
-
-      return {
-        data: {
-          success: true,
-          rewards: { exp: expGain, gold: goldGain },
-          character: chars[charIdx],
-          levelsGained,
-          loot: lootDrop,
-          newLevel,
-          newExp,
-          newGold,
-        },
-      };
     }
 
     case 'getPlayer': {

@@ -322,11 +322,13 @@ export default function Battle({ character, onCharacterUpdate }) {
         isElite: enemy.isElite || false,
         isBoss: enemy.isBoss || false,
         partySize: partySize,
+        _fallbackCharacter: character,
       });
 
-      const result = response.data;
+      const result = response?.data;
       if (!result?.success) {
-        addLog(`⚠️ Error processing rewards`);
+        console.error('[handleEnemyDefeat] Fight failed:', result);
+        addLog(`⚠️ Error processing rewards: ${result?.error || 'unknown'}`);
         setTimeout(() => spawnEnemy(), 2500);
         return;
       }
