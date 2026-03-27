@@ -1749,6 +1749,17 @@ export const base44 = {
     },
   },
 
+  async testConnection() {
+    const url = getApiUrl();
+    try {
+      const res = await fetch(`${url}/api/test`);
+      const data = await res.json();
+      return { success: true, data };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  },
+
   getMode,
   setMode,
   getApiUrl,
