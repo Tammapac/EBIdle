@@ -3,9 +3,10 @@ import { supabaseSync } from '@/lib/supabaseSync';
 
 const MODE_KEY = 'eb_connection_mode';
 const API_URL_KEY = 'eb_api_url';
+const DEFAULT_API_URL = 'http://46.224.121.242:3000';
 
 function getMode() {
-  try { return localStorage.getItem(MODE_KEY) || 'local'; } catch { return 'local'; }
+  try { return localStorage.getItem(MODE_KEY) || 'server'; } catch { return 'server'; }
 }
 
 function setMode(mode) {
@@ -13,7 +14,7 @@ function setMode(mode) {
 }
 
 function getApiUrl() {
-  try { return localStorage.getItem(API_URL_KEY) || ''; } catch { return ''; }
+  try { return localStorage.getItem(API_URL_KEY) || DEFAULT_API_URL; } catch { return DEFAULT_API_URL; }
 }
 
 function setApiUrl(url) {
