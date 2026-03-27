@@ -28,3 +28,15 @@ timeoutMs = 20000
 [userenv]
 
 [userenv.shared]
+
+[[ports]]
+localPort = 8080
+externalPort = 3002
+
+[[ports]]
+localPort = 8081
+externalPort = 3001
+
+[[ports]]
+localPort = 24631
+externalPort = 3000
